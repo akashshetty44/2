@@ -1,53 +1,61 @@
-import numpy as np
-from sklearn.datasets import fetch_20newsgroups
-from sklearn.model_selection import train_test_split
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.utils import to_categorical
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Embedding, LSTM, Dense
+import torch
+import torch.nn as nn
+import torchvision
+import torchvision.transforms as transforms
+import matplotlib.pyplot as plt
 
-# Load Dataset (using only 4 categories to keep it fast)
-categories = ['rec.sport.baseball', 'sci.space', 'comp.graphics', 'talk.politics.guns']
-data = fetch_20newsgroups(subset='all', categories=categories)
-texts, labels = data.data, data.target
-num_classes = len(set(labels))
+# Load MNIST Dataset
+transform = transforms.ToTensor()
+train_data = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+test_data = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
 
-# Preprocess Text
-tokenizer = Tokenizer(num_words=5000, oov_token="<OOV>")
-tokenizer.fit_on_texts(texts)
+train_loader = torch.utils.data.DataLoader(train_data, batch_size=64, shuffle=True)
+test_loader = torch.utils.data.DataLoader(test_data, batch_size=10, shuffle=True)
 
-X = tokenizer.texts_to_sequences(texts)
-X = pad_sequences(X, maxlen=100)
-y = to_categorical(labels, num_classes=num_classes)
+# Autoencoder Model
+class Autoencoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = nn.Sequential(nn.Linear(784, 128), nn.ReLU(), nn.Linear(128, 64))
+        self.decoder = nn.Sequential(nn.Linear(64, 128), nn.ReLU(), nn.Linear(128, 784), nn.Sigmoid())
 
-# Split Data
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    def forward(self, x):
+        x = self.encoder(x.view(-1, 784))
+        x = self.decoder(x)
+        return x
 
-# Build Model
-model = Sequential([
-    Embedding(input_dim=5000, output_dim=64),
-    LSTM(64),
-    Dense(num_classes, activation="softmax")
-])
-model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=["accuracy"])
+model = Autoencoder()
+loss_fn = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-# Train
-model.fit(X_train, y_train, epochs=5, batch_size=64, validation_split=0.1)
+# Training
+for epoch in range(5):
+    running_loss = 0.0
+    for images, _ in train_loader:
+        output = model(images)
+        loss = loss_fn(output, images.view(-1, 784))
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item()
+    print("Epoch", epoch+1, "Loss =", round(running_loss / len(train_loader), 4))
 
-# Evaluate
-loss, acc = model.evaluate(X_test, y_test)
-print("\nTest Accuracy:", round(acc, 4))
-Epoch 1/5
-44/44 ━━━━━━━━━━━━━━━━━━━━ 2s 24ms/step - accuracy: 0.3786 - loss: 1.3274 - val_accuracy: 0.5839 - val_loss: 1.0653
-Epoch 2/5
-44/44 ━━━━━━━━━━━━━━━━━━━━ 1s 20ms/step - accuracy: 0.7023 - loss: 0.8017 - val_accuracy: 0.7419 - val_loss: 0.7085
-Epoch 3/5
-44/44 ━━━━━━━━━━━━━━━━━━━━ 1s 20ms/step - accuracy: 0.8457 - loss: 0.4867 - val_accuracy: 0.8516 - val_loss: 0.4531
-Epoch 4/5
-44/44 ━━━━━━━━━━━━━━━━━━━━ 1s 20ms/step - accuracy: 0.9364 - loss: 0.2335 - val_accuracy: 0.9129 - val_loss: 0.2822
-Epoch 5/5
-44/44 ━━━━━━━━━━━━━━━━━━━━ 1s 20ms/step - accuracy: 0.9669 - loss: 0.1289 - val_accuracy: 0.9129 - val_loss: 0.2965
-25/25 ━━━━━━━━━━━━━━━━━━━━ 0s 6ms/step - accuracy: 0.8952 - loss: 0.3437
 
-Test Accuracy: 0.8952
+images, _ = next(iter(test_loader))
+
+with torch.no_grad():
+    outputs = model(images)
+
+outputs = outputs.view(-1, 1, 28, 28)
+
+fig, axes = plt.subplots(2, 10, figsize=(10, 2))
+
+for i in range(10):
+    axes[0, i].imshow(images[i].cpu().squeeze(), cmap="gray")
+    axes[0, i].axis("off")
+
+    axes[1, i].imshow(outputs[i].cpu().squeeze(), cmap="gray")
+    axes[1, i].axis("off")
+
+plt.tight_layout()
+plt.show()
